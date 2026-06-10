@@ -5,6 +5,8 @@ from datetime import datetime
 import random
 import base64
 import numpy as np
+import requests
+from bs4 import BeautifulSoup
 
 # ==========================================
 # 1. PAGE CONFIGURATION
@@ -155,6 +157,41 @@ def load_model_securely():
 brain, model_error = load_model_securely()
 
 # ==========================================
+# EXTRA: HELPER FUNCTION FOR WEB SCRAPING
+# ==========================================
+def scrape_website_content(url_string):
+    """Muna kwaso ainihin rubutun dake cikin kowace gidan yanar gizo a asirce"""
+    clean_url = url_string.strip()
+    
+    # Idan mutum bai saka http/https ba, mu saka masa don kada requests ya ba da error
+    if not clean_url.startswith(("http://", "https://")):
+        clean_url = "https://" + clean_url
+        
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        # Shiga shafin, ka ba shi sakan 3 kacal don kada app din ya yi nauyi
+        response = requests.get(clean_url, headers=headers, timeout=3, verify=False)
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, "html.parser")
+            # Goge kofofin JavaScript da CSS dake cikin HTML din
+            for script in soup(["script", "style"]):
+                script.extract()
+            # Kwaso tsaftataccen rubutu
+            web_text = soup.get_text()
+            # Hada shi wuri guda da tace sarari
+            lines = (line.strip() for line in web_text.split())
+            chunks = (phrase for line in lines for phrase in line.split("  "))
+            final_text = " ".join(chunk for chunk in chunks if chunk)
+            return final_text if final_text.strip() else url_string
+    except Exception:
+        # Idan an samu matsalar intanet ko rashin shiga shafi, dawo da ainihin rubutun mutum
+        return url_string
+    return url_string
+
+# ==========================================
 # 5. SIDEBAR DASHBOARD
 # ==========================================
 with st.sidebar:
@@ -217,7 +254,7 @@ st.markdown("### 🔍 Real-Time Content Scanner")
 
 user_input = st.text_input(
     label="Input a URL domain string or textual elements below to scan for security compliance:",
-    placeholder="e.g., streaming-porn-portal.net/movie_id=982"
+    placeholder="e.g., Introductions to machine learning for beginners"
 )
 
 st.write("")
@@ -227,23 +264,40 @@ if st.button("Execute Deep Scan"):
         st.warning("⚠️ Action Blocked: The input field cannot be empty. Please specify content.")
     else:
         with st.spinner("Extracting parameters and running semantic scan..."):
-            # Predict daga ainihin kwakwalwar model dinka
-            prediction = brain.predict([user_input])[0]
-            pred_str = str(prediction).strip()
             
-            # Lissafin AI Risk Score na Gaskiya dangane da model matrices
-            try:
-                if hasattr(brain, "predict_proba"):
-                    proba = brain.predict_proba([user_input])[0]
-                    risk_score = int(proba[1] * 100) if len(proba) > 1 else int(proba[0] * 100)
-                elif hasattr(brain, "decision_function"):
-                    decision = brain.decision_function([user_input])[0]
-                    probability = 1 / (1 + np.exp(-decision))
-                    risk_score = int(probability * 100)
-                else:
-                    risk_score = 92 if pred_str.lower() in ["blocked", "yes", "1"] else 12
-            except Exception:
-                risk_score = 85 if pred_str.lower() in ["blocked", "yes", "1"] else 8
+            # 1. BIYAR DA RUBUTU ZUWA ƘANANAN BAƘAƘE DA TACE SHARADI
+            checked_input = user_input.lower().strip()
+            
+            # JERIN KALMOMIN BATSA DA MUKASAN AI ƊINKA YANA RASHIN GANO WA (FALSE NEGATIVES)
+            hardcoded_blacklist = ["bluefilms", "bluefilm", "porn", "xxx", "lesbian", "adultsite", "xvideos"]
+            
+            # Dabarar katseshi ta atomatik idan yana dauke da wadannan kalmomin
+            if any(word in checked_input for word in hardcoded_blacklist):
+                pred_str = "Blocked"
+                risk_score = 99  # Tunda muna da tabbacin na batsa ne gaba daya
+            else:
+                # --- TSARIN WEB SCRAPING DYNAMICS (Mafi inganci idan babu kalmar a sama) ---
+                input_to_predict = user_input
+                if any(ext in checked_input for ext in [".com", ".net", ".org", "http", ".site", ".xyz", ".gov", ".edu"]):
+                    input_to_predict = scrape_website_content(user_input)
+                
+                # Predict daga ainihin kwakwalwar model dinka ta amfani da rubutun da aka kwaso
+                prediction = brain.predict([input_to_predict])[0]
+                pred_str = str(prediction).strip()
+                
+                # Lissafin AI Risk Score na Gaskiya dangane da model matrices
+                try:
+                    if hasattr(brain, "predict_proba"):
+                        proba = brain.predict_proba([input_to_predict])[0]
+                        risk_score = int(proba[1] * 100) if len(proba) > 1 else int(proba[0] * 100)
+                    elif hasattr(brain, "decision_function"):
+                        decision = brain.decision_function([input_to_predict])[0]
+                        probability = 1 / (1 + np.exp(-decision))
+                        risk_score = int(probability * 100)
+                    else:
+                        risk_score = 92 if pred_str.lower() in ["blocked", "yes", "1"] else 12
+                except Exception:
+                    risk_score = 85 if pred_str.lower() in ["blocked", "yes", "1"] else 8
 
             # Sanya sharadi da trigger na animation
             if pred_str.lower() in ["blocked", "yes", "1"]:
